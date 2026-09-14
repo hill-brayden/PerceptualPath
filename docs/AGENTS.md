@@ -1,5 +1,9 @@
 # AGENTS.md — Perceptual Path
 
+## Release status — 2026-09-14
+
+The user saved the current working implementation as `addon/perceptual_pathv1.6.py` (internal version 1.6.1). Treat that file as canonical; older `addon/perceptual_path.py` references below are historical. V1.6A Visual Depth is implemented. Preserve this saved source and the existing feature protections. See `README.md` and `docs/RELEASE_v1.6.1.md` for current behavior and packaging. Later roadmap features still require an explicit request.
+
 ## Purpose
 Perceptual Path is a Blender Python add-on for architectural perception analysis. It simulates a human-like agent moving through architecture, records only geometry actually visible within a human field of view, converts that visibility into a 3D point-cloud memory, and derives architectural analysis from the journey.
 

@@ -1,5 +1,9 @@
 # Perceptual Path — Updated Project Context
 
+## Release update — 2026-09-14
+
+The current user-saved source is `addon/perceptual_pathv1.6.py`, with internal version 1.6.1. V1.6A Visual Depth is implemented, including depth attributes, adjustable color range, legends, and the full Analysis Summary. The saved version also uses BVH obstacle footprints and relative Persistence colors while retaining absolute Persistence data. See `README.md` and `docs/RELEASE_v1.6.1.md` for current behavior. The V1.5 context below is retained as historical design context; its filenames and next-feature status are superseded by this update. No later roadmap stage is authorized by this release.
+
 **Updated:** 2026-09-13  
 **Current user-facing milestone:** Perceptual Path V1.5  
 **Next target:** V1.6 analytical expansion

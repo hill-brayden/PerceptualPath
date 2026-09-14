@@ -1,0 +1,16 @@
+# Generated release assets are uploaded to GitHub Releases separately.
+/dist/
+
+# Python caches
+__pycache__/
+*.py[cod]
+
+# Blender recovery copies (already tracked files stay tracked).
+*.blend[0-9]
+*.blend[0-9][0-9]
+
+# Editor and operating-system temporary files
+*.swp
+*.tmp
+.DS_Store
+Thumbs.db

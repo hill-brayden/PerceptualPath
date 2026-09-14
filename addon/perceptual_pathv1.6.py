@@ -1,7 +1,7 @@
 bl_info = {
     "name": "Perceptual Path",
     "author": "Brayden Hill",
-    "version": (0, 5, 0),
+    "version": (1, 6, 1),
     "blender": (4, 0, 0),
     "location": "View3D > Sidebar > Perceptual Path",
     "description": "Human perception point-cloud analysis for architectural space",
@@ -13,6 +13,7 @@ import math
 import heapq
 
 from mathutils import Vector
+from mathutils.bvhtree import BVHTree
 
 
 # =======================================================
@@ -208,6 +209,41 @@ def cast_fov(
 
     return hit_points
 
+
+def cast_fov_detailed(
+    context,
+    eye,
+    target,
+    horizontal_fov,
+    vertical_fov,
+    horizontal_rays,
+    vertical_rays,
+    max_distance
+):
+    """Return first-hit locations and eye-to-hit distances in world units."""
+
+    hit_points = cast_fov(
+        context,
+        eye,
+        target,
+        horizontal_fov,
+        vertical_fov,
+        horizontal_rays,
+        vertical_rays,
+        max_distance
+    )
+
+    records = []
+
+    for location in hit_points:
+        records.append({
+            "location": location.copy(),
+            "distance": (location - eye).length
+        })
+
+    return records
+
+
 def create_cloud_object(
     context,
     points,
@@ -309,6 +345,19 @@ def point_to_voxel(point, voxel_size):
     )
 
 
+def calculate_path_length(points):
+    """Return total polyline length through the sampled navigation path."""
+    total = 0.0
+
+    for i in range(len(points) - 1):
+        total += (
+            points[i + 1]
+            - points[i]
+        ).length
+
+    return total
+
+
 def configure_analysis_material(mode):
     """Create/update the material used to visualize analysis attributes."""
 
@@ -352,6 +401,24 @@ def configure_analysis_material(mode):
         low.color = (0.78, 0.78, 0.78, 1.0)
         high.color = (0.78, 0.78, 0.78, 1.0)
 
+    elif mode == 'PERSISTENCE':
+        # The real analytical value remains stored in "persistence".
+        # This relative attribute stretches the current run's strongest
+        # persistence to 1.0 so the heatmap remains visually legible.
+        attribute.attribute_name = "relative_persistence"
+
+        low.position = 0.0
+        high.position = 1.0
+
+        low.color = (0.02, 0.12, 0.95, 1.0)
+        high.color = (1.0, 0.05, 0.01, 1.0)
+
+        cyan = ramp.color_ramp.elements.new(0.30)
+        cyan.color = (0.02, 0.75, 1.0, 1.0)
+
+        yellow = ramp.color_ramp.elements.new(0.60)
+        yellow.color = (1.0, 0.78, 0.02, 1.0)
+
     elif mode == 'REVEAL':
         attribute.attribute_name = "first_seen"
         low.position = 0.0
@@ -362,6 +429,47 @@ def configure_analysis_material(mode):
         middle = ramp.color_ramp.elements.new(0.5)
         middle.color = (0.55, 0.08, 0.85, 1.0)
 
+    elif mode == 'VISUAL_DEPTH':
+        attribute.attribute_name = "mean_depth"
+
+        # User-controlled display range in meters.
+        # Stored depth attributes remain unchanged.
+        normalize = nodes.new("ShaderNodeMath")
+        normalize.name = "PP_Depth_Normalize"
+        depth_display_max = max(
+            getattr(bpy.context.scene, "pp_depth_display_max", 20.0),
+            0.1
+        )
+
+        normalize.label = (
+            f"Visual Depth: 0–{depth_display_max:.1f} m"
+        )
+        normalize.operation = 'DIVIDE'
+        normalize.inputs[1].default_value = depth_display_max
+
+        links.remove(ramp.inputs["Fac"].links[0])
+
+        links.new(
+            attribute.outputs["Fac"],
+            normalize.inputs[0]
+        )
+
+        links.new(
+            normalize.outputs[0],
+            ramp.inputs["Fac"]
+        )
+
+        low.position = 0.0
+        low.color = (1.0, 0.12, 0.02, 1.0)
+
+        high.position = 1.0
+        high.color = (0.02, 0.12, 0.95, 1.0)
+
+        middle = ramp.color_ramp.elements.new(0.5)
+        middle.color = (1.0, 0.85, 0.02, 1.0)
+
+        far = ramp.color_ramp.elements.new(0.75)
+        far.color = (0.02, 0.85, 1.0, 1.0)
     else:
         attribute.attribute_name = "persistence"
         low.position = 0.0
@@ -392,6 +500,7 @@ def create_memory_cloud(
     points = []
     counts = []
     persistence_values = []
+    relative_persistence_values = []
     first_seen_values = []
     last_seen_values = []
 
@@ -432,6 +541,24 @@ def create_memory_cloud(
             min(max(last_seen, 0.0), 1.0)
         )
 
+    # Absolute persistence remains the analytical metric.
+    # Relative persistence is only a display normalization so
+    # long paths do not collapse the entire heatmap into blue.
+    strongest_persistence = max(
+        persistence_values,
+        default=0.0
+    )
+
+    if strongest_persistence > 0.0:
+        relative_persistence_values = [
+            min(max(value / strongest_persistence, 0.0), 1.0)
+            for value in persistence_values
+        ]
+    else:
+        relative_persistence_values = [
+            0.0 for _ in persistence_values
+        ]
+
     mesh = bpy.data.meshes.new(name + "_Mesh")
     mesh.from_pydata(points, [], [])
     mesh.update()
@@ -448,6 +575,12 @@ def create_memory_cloud(
         domain='POINT'
     )
 
+    relative_persistence_attr = mesh.attributes.new(
+        name="relative_persistence",
+        type='FLOAT',
+        domain='POINT'
+    )
+
     first_seen_attr = mesh.attributes.new(
         name="first_seen",
         type='FLOAT',
@@ -460,14 +593,79 @@ def create_memory_cloud(
         domain='POINT'
     )
 
+    # Adding attributes can invalidate earlier references in Blender 4.x.
+    count_attr = mesh.attributes["observation_count"]
+    persistence_attr = mesh.attributes["persistence"]
+    relative_persistence_attr = mesh.attributes["relative_persistence"]
+    first_seen_attr = mesh.attributes["first_seen"]
+    last_seen_attr = mesh.attributes["last_seen"]
+
     for i in range(len(points)):
         count_attr.data[i].value = counts[i]
         persistence_attr.data[i].value = persistence_values[i]
+        relative_persistence_attr.data[i].value = (
+            relative_persistence_values[i]
+        )
         first_seen_attr.data[i].value = first_seen_values[i]
         last_seen_attr.data[i].value = last_seen_values[i]
+    units = context.scene.unit_settings
+    meters_per_unit = (
+        1.0 if units.system == 'NONE'
+        else units.scale_length
+    )
 
+    mean_depth_attr = mesh.attributes.new(
+        name="mean_depth",
+        type='FLOAT',
+        domain='POINT'
+    )
+
+    min_depth_attr = mesh.attributes.new(
+        name="min_depth",
+        type='FLOAT',
+        domain='POINT'
+    )
+
+    max_depth_attr = mesh.attributes.new(
+        name="max_depth",
+        type='FLOAT',
+        domain='POINT'
+    )
+
+    mean_depth_attr = mesh.attributes["mean_depth"]
+    min_depth_attr = mesh.attributes["min_depth"]
+    max_depth_attr = mesh.attributes["max_depth"]
+
+    for i, data in enumerate(memory.values()):
+
+        mean_depth_attr.data[i].value = (
+            data["depth_sum"] / data["depth_count"]
+        ) * meters_per_unit
+
+        min_depth_attr.data[i].value = (
+            data["min_depth"] * meters_per_unit
+        )
+
+        max_depth_attr.data[i].value = (
+            data["max_depth"] * meters_per_unit
+        )
     cloud_obj = bpy.data.objects.new(name, mesh)
     context.collection.objects.link(cloud_obj)
+    total_depth_sum = sum(
+        data["depth_sum"] for data in memory.values()
+    )
+
+    total_depth_count = sum(
+        data["depth_count"] for data in memory.values()
+    )
+
+    cloud_obj["pp_mean_visual_depth"] = (
+        total_depth_sum / total_depth_count
+    ) * meters_per_unit
+
+    cloud_obj["pp_max_visual_depth"] = max(
+        data["max_depth"] for data in memory.values()
+    ) * meters_per_unit
 
     modifier = cloud_obj.modifiers.new(
         name="Point_Display",
@@ -781,6 +979,43 @@ class PP_OT_scan_pov(bpy.types.Operator):
 # PATHFINDING
 # =======================================================
 
+def build_obstacle_bvh(obj, depsgraph):
+
+    evaluated = obj.evaluated_get(
+        depsgraph
+    )
+
+    mesh = evaluated.to_mesh()
+
+    if mesh is None:
+        return None
+
+    vertices = [
+        evaluated.matrix_world @ vertex.co
+        for vertex in mesh.vertices
+    ]
+
+    polygons = [
+        tuple(poly.vertices)
+        for poly in mesh.polygons
+    ]
+
+    if not vertices or not polygons:
+
+        evaluated.to_mesh_clear()
+
+        return None
+
+    bvh = BVHTree.FromPolygons(
+        vertices,
+        polygons,
+        all_triangles=False
+    )
+
+    evaluated.to_mesh_clear()
+
+    return bvh
+
 def world_bbox_xy(obj):
 
     corners = [
@@ -808,7 +1043,16 @@ def get_obstacles(scene):
 
     for obj in scene.objects:
 
-        if obj.type != 'MESH':
+        if obj.hide_get():
+            continue
+
+        if obj.hide_viewport:
+            continue
+
+        if obj.type not in {
+            'MESH',
+            'CURVE'
+        }:
             continue
 
         # Ignore our generated data
@@ -820,7 +1064,7 @@ def get_obstacles(scene):
 
         # Ignore very flat objects such as floors
         # Walls should usually be taller than this.
-        if obj.dimensions.z < 1.0:
+        if obj.dimensions.z < 0.3:
             continue
 
         obstacles.append(obj)
@@ -846,12 +1090,6 @@ def build_navigation_grid(
         min_x, max_x, min_y, max_y = (
             world_bbox_xy(obj)
         )
-
-        min_x -= clearance
-        max_x += clearance
-
-        min_y -= clearance
-        max_y += clearance
 
         obstacle_boxes.append(
             (
@@ -888,34 +1126,140 @@ def build_navigation_grid(
         / grid_size
     )
 
+    # -----------------------------------------
+    # BUILD ACTUAL GEOMETRY BVHs
+    # -----------------------------------------
+
+    depsgraph = bpy.context.evaluated_depsgraph_get()
+
+    obstacle_bvhs = []
+
+    for obj in obstacles:
+
+        bvh = build_obstacle_bvh(
+            obj,
+            depsgraph
+        )
+
+        if bvh is not None:
+
+            obstacle_bvhs.append(
+                bvh
+            )
+
+
+    # -----------------------------------------
+    # SAMPLE ACTUAL OBSTACLE FOOTPRINTS
+    # -----------------------------------------
+
     blocked = set()
+
+    ray_direction = Vector(
+        (
+            0,
+            0,
+            -1
+        )
+    )
+
+    # Start well above the architecture.
+    # We only care whether obstacle geometry
+    # exists at this XY grid position.
+    ray_start_z = 1000.0
+
+    ray_distance = 2000.0
+
 
     for gx in range(width + 1):
 
-        wx = world_min_x + gx * grid_size
+        wx = (
+            world_min_x
+            + gx * grid_size
+        )
 
         for gy in range(height + 1):
 
-            wy = world_min_y + gy * grid_size
+            wy = (
+                world_min_y
+                + gy * grid_size
+            )
 
-            for (
-                min_x,
-                max_x,
-                min_y,
-                max_y
-            ) in obstacle_boxes:
+            ray_origin = Vector(
+                (
+                    wx,
+                    wy,
+                    ray_start_z
+                )
+            )
 
-                if (
-                    min_x <= wx <= max_x
-                    and
-                    min_y <= wy <= max_y
-                ):
+            for bvh in obstacle_bvhs:
+
+                location, normal, index, distance = (
+                    bvh.ray_cast(
+                        ray_origin,
+                        ray_direction,
+                        ray_distance
+                    )
+                )
+
+                if location is not None:
 
                     blocked.add(
-                        (gx, gy)
+                        (
+                            gx,
+                            gy
+                        )
                     )
 
                     break
+
+    # -----------------------------------------
+    # EXPAND BLOCKED CELLS BY AGENT CLEARANCE
+    # -----------------------------------------
+
+    if clearance > 0.0:
+
+        clearance_cells = math.ceil(
+            clearance
+            / grid_size
+        )
+
+        expanded_blocked = set(
+            blocked
+        )
+
+        for gx, gy in blocked:
+
+            for dx in range(
+                -clearance_cells,
+                clearance_cells + 1
+            ):
+
+                for dy in range(
+                    -clearance_cells,
+                    clearance_cells + 1
+                ):
+
+                    neighbor = (
+                        gx + dx,
+                        gy + dy
+                    )
+
+                    nx, ny = neighbor
+
+                    if (
+                        0 <= nx <= width
+                        and
+                        0 <= ny <= height
+                        and math.hypot(dx, dy) * grid_size
+                        <= clearance + 1e-9
+                    ):
+
+                        expanded_blocked.add(
+                            neighbor
+                        )
+
+        blocked = expanded_blocked
 
     def world_to_grid(pos):
 
@@ -1334,10 +1678,127 @@ class PP_PT_main_panel(bpy.types.Panel):
             text=""
         )
 
+        legend = layout.box()
+        legend.label(text="LEGEND")
+
+        if scene.pp_display_mode == 'PERSISTENCE':
+
+            legend.label(
+                text="Blue = Low persistence"
+            )
+
+            legend.label(
+                text="Yellow = Moderate"
+            )
+
+            legend.label(
+                text="Red = Highest in this run"
+            )
+
+            legend.separator()
+
+            legend.label(
+                text="Color = relative persistence"
+            )
+
+            legend.label(
+                text="Summary % = absolute persistence"
+            )
+
+        elif scene.pp_display_mode == 'REVEAL':
+
+            legend.label(
+                text="Blue = Seen early"
+            )
+
+            legend.label(
+                text="Purple = Mid journey"
+            )
+
+            legend.label(
+                text="Red = Seen late"
+            )
+
+            legend.separator()
+
+            legend.label(
+                text="Metric:"
+            )
+
+            legend.label(
+                text="When a region first entered"
+            )
+
+            legend.label(
+                text="the agent's visual field"
+            )
+
+        elif scene.pp_display_mode == 'VISUAL_DEPTH':
+
+            cloud = bpy.data.objects.get("PP_Experience_Cloud")
+
+            if (
+                cloud is None
+                or cloud.type != 'MESH'
+                or cloud.data.attributes.get("mean_depth") is None
+            ):
+                legend.label(text="Gray = Depth data unavailable")
+                legend.label(text="Run Experience to calculate")
+
+            else:
+                depth_max = scene.pp_depth_display_max
+                legend.label(text="Red/Orange = near")
+                legend.label(
+                    text=f"Yellow = {depth_max * 0.50:.1f} m"
+                )
+                legend.label(
+                    text=f"Cyan = {depth_max * 0.75:.1f} m"
+                )
+                legend.label(
+                    text=f"Blue = {depth_max:.1f} m or more"
+                )
+
+            legend.separator()
+            legend.label(text="Metric:")
+            legend.label(text="Mean first-hit distance")
+            legend.label(text="for each visible region, in meters")
+
+            layout.prop(
+                scene,
+                "pp_depth_display_max",
+                text="Depth Color Max"
+            )
+
+        else:
+
+            legend.label(
+                text="Neutral perception cloud"
+            )
+
         layout.label(
             text="Use Material Preview for colors",
             icon='INFO'
         )
+        if scene.pp_display_mode == 'VISUAL_DEPTH':
+            cloud = bpy.data.objects.get("PP_Experience_Cloud")
+
+            if (
+                cloud is None
+                or cloud.type != 'MESH'
+                or cloud.data.attributes.get("mean_depth") is None
+            ):
+                layout.label(
+                    text="Run Experience to generate depth data",
+                    icon='INFO'
+                )
+            else:
+                layout.label(
+                    text=(
+                        f"Depth colors: 0–"
+                        f"{scene.pp_depth_display_max:.1f} m"
+                    ),
+                    icon='INFO'
+                )
 
         layout.separator()
 
@@ -1362,6 +1823,164 @@ class PP_PT_main_panel(bpy.types.Panel):
             text="Press Spacebar to play",
             icon='PLAY'
         )
+
+        layout.separator()
+
+        # -----------------------
+        # ANALYSIS SUMMARY
+        # -----------------------
+
+        layout.label(
+            text="ANALYSIS SUMMARY"
+        )
+
+        summary = layout.box()
+
+        route_length = scene.get(
+            "pp_route_length",
+            None
+        )
+
+        if route_length is None:
+
+            summary.label(
+                text="Run Experience to calculate",
+                icon='INFO'
+            )
+
+        else:
+
+            viewpoints = scene.get(
+                "pp_viewpoint_count",
+                0
+            )
+
+            regions = scene.get(
+                "pp_region_count",
+                0
+            )
+
+            mean_persistence = scene.get(
+                "pp_mean_persistence",
+                0.0
+            )
+
+            max_persistence = scene.get(
+                "pp_max_persistence",
+                0.0
+            )
+
+            early_reveal = scene.get(
+                "pp_early_reveal",
+                0.0
+            )
+
+            mid_reveal = scene.get(
+                "pp_mid_reveal",
+                0.0
+            )
+
+            late_reveal = scene.get(
+                "pp_late_reveal",
+                0.0
+            )
+
+            summary.label(
+                text=f"Route Length: {route_length:.2f} m"
+            )
+
+            summary.label(
+                text=f"Viewpoints: {viewpoints}"
+            )
+
+            summary.label(
+                text=f"Visible Regions: {regions}"
+            )
+
+            summary.separator()
+
+            summary.label(
+                text=(
+                    f"Mean Persistence: "
+                    f"{mean_persistence * 100:.1f}%"
+                )
+            )
+
+            summary.label(
+                text=(
+                    f"Max Persistence: "
+                    f"{max_persistence * 100:.1f}%"
+                )
+            )
+
+            summary.separator()
+
+            summary.label(
+                text=(
+                    f"Early Reveal: "
+                    f"{early_reveal * 100:.1f}%"
+                )
+            )
+
+            summary.label(
+                text=(
+                    f"Mid Reveal: "
+                    f"{mid_reveal * 100:.1f}%"
+                )
+            )
+
+            summary.label(
+                text=(
+                    f"Late Reveal: "
+                    f"{late_reveal * 100:.1f}%"
+                )
+            )
+
+        summary.separator()
+
+        cloud = bpy.data.objects.get("PP_Experience_Cloud")
+
+        if (
+            cloud is not None
+            and cloud.type == 'MESH'
+            and cloud.data.attributes.get("mean_depth") is not None
+            and "pp_mean_visual_depth" in cloud
+            and "pp_max_visual_depth" in cloud
+        ):
+            mean_depth = cloud["pp_mean_visual_depth"]
+            max_depth = cloud["pp_max_visual_depth"]
+
+            summary.label(
+                text=f"Mean Visual Depth: {mean_depth:.2f} m"
+            )
+
+            summary.label(
+                text=f"Max Visual Depth: {max_depth:.2f} m"
+            )
+
+            units = scene.unit_settings
+            meters_per_unit = (
+                1.0 if units.system == 'NONE'
+                else units.scale_length
+            )
+            ray_limit_m = (
+                scene.pp_max_distance * meters_per_unit
+            )
+
+            if (
+                ray_limit_m > 0.0
+                and max_depth >= ray_limit_m * 0.98
+            ):
+                summary.label(
+                    text="Max depth reaches ray limit",
+                    icon='ERROR'
+                )
+
+        else:
+            summary.label(
+                text="Run Experience to calculate Visual Depth",
+                icon='INFO'
+            )
 
         layout.separator()
 
@@ -1530,7 +2149,7 @@ class PP_OT_run_experience(bpy.types.Operator):
                 (0, 0, eye_height)
             )
 
-            hits = cast_fov(
+            hits = cast_fov_detailed(
                 context,
                 eye,
                 target,
@@ -1545,7 +2164,10 @@ class PP_OT_run_experience(bpy.types.Operator):
             # A cell is counted once per sampled viewpoint, not once per ray.
             seen_this_step = {}
 
-            for hit in hits:
+            for record in hits:
+
+                hit = record["location"]
+                distance = record["distance"]
 
                 key = point_to_voxel(
                     hit,
@@ -1556,13 +2178,29 @@ class PP_OT_run_experience(bpy.types.Operator):
 
                     seen_this_step[key] = {
                         "position_sum": hit.copy(),
-                        "ray_count": 1
+                        "ray_count": 1,
+                        "depth_sum": distance,
+                        "min_depth": distance,
+                        "max_depth": distance
                     }
 
                 else:
 
-                    seen_this_step[key]["position_sum"] += hit
-                    seen_this_step[key]["ray_count"] += 1
+                    step_data = seen_this_step[key]
+
+                    step_data["position_sum"] += hit
+                    step_data["ray_count"] += 1
+                    step_data["depth_sum"] += distance
+
+                    step_data["min_depth"] = min(
+                        step_data["min_depth"],
+                        distance
+                    )
+
+                    step_data["max_depth"] = max(
+                        step_data["max_depth"],
+                        distance
+                    )
 
             for key, step_data in seen_this_step.items():
 
@@ -1577,7 +2215,11 @@ class PP_OT_run_experience(bpy.types.Operator):
                         "position_sum": step_position.copy(),
                         "count": 1,
                         "first_seen": step_number,
-                        "last_seen": step_number
+                        "last_seen": step_number,
+                        "depth_sum": step_data["depth_sum"],
+                        "depth_count": step_data["ray_count"],
+                        "min_depth": step_data["min_depth"],
+                        "max_depth": step_data["max_depth"]
                     }
 
                 else:
@@ -1585,6 +2227,19 @@ class PP_OT_run_experience(bpy.types.Operator):
                     memory[key]["position_sum"] += step_position
                     memory[key]["count"] += 1
                     memory[key]["last_seen"] = step_number
+
+                    memory[key]["depth_sum"] += step_data["depth_sum"]
+                    memory[key]["depth_count"] += step_data["ray_count"]
+
+                    memory[key]["min_depth"] = min(
+                        memory[key]["min_depth"],
+                        step_data["min_depth"]
+                    )
+
+                    memory[key]["max_depth"] = max(
+                        memory[key]["max_depth"],
+                        step_data["max_depth"]
+                    )
 
         if len(memory) == 0:
 
@@ -1603,6 +2258,102 @@ class PP_OT_run_experience(bpy.types.Operator):
             len(sampled_indices)
         )
 
+        # ===================================================
+        # ANALYSIS SUMMARY
+        # ===================================================
+
+        total_steps = max(
+            len(sampled_indices),
+            1
+        )
+
+        route_length = calculate_path_length(
+            path_points
+        )
+
+        persistence_values = [
+            data["count"] / total_steps
+            for data in memory.values()
+        ]
+
+        mean_persistence = (
+            sum(persistence_values)
+            / len(persistence_values)
+            if persistence_values
+            else 0.0
+        )
+
+        max_persistence = (
+            max(persistence_values)
+            if persistence_values
+            else 0.0
+        )
+
+        early_count = 0
+        mid_count = 0
+        late_count = 0
+
+        for data in memory.values():
+
+            reveal_position = (
+                data["first_seen"]
+                / max(total_steps - 1, 1)
+            )
+
+            if reveal_position < 0.333:
+                early_count += 1
+
+            elif reveal_position < 0.666:
+                mid_count += 1
+
+            else:
+                late_count += 1
+
+        region_count = len(memory)
+
+        if region_count > 0:
+
+            early_reveal = (
+                early_count / region_count
+            )
+
+            mid_reveal = (
+                mid_count / region_count
+            )
+
+            late_reveal = (
+                late_count / region_count
+            )
+
+        else:
+
+            early_reveal = 0.0
+            mid_reveal = 0.0
+            late_reveal = 0.0
+
+        # Store the summary on the Blender scene so the
+        # UI can display it without rerunning the simulation.
+        scene["pp_route_length"] = route_length
+        scene["pp_viewpoint_count"] = len(
+            sampled_indices
+        )
+        scene["pp_region_count"] = region_count
+        scene["pp_mean_persistence"] = (
+            mean_persistence
+        )
+        scene["pp_max_persistence"] = (
+            max_persistence
+        )
+        scene["pp_early_reveal"] = (
+            early_reveal
+        )
+        scene["pp_mid_reveal"] = (
+            mid_reveal
+        )
+        scene["pp_late_reveal"] = (
+            late_reveal
+        )
+
         self.report(
             {'INFO'},
             (
@@ -1615,11 +2366,7 @@ class PP_OT_run_experience(bpy.types.Operator):
         return {'FINISHED'}
 
 def update_display_mode(self, context):
-    """Switch the existing cloud between plain, persistence, and reveal."""
-
-    configure_analysis_material(
-        context.scene.pp_display_mode
-    )
+    """Update analysis colors, using plain display if depth data is missing."""
 
     cloud = bpy.data.objects.get(
         "PP_Experience_Cloud"
@@ -1627,6 +2374,17 @@ def update_display_mode(self, context):
 
     if cloud is None:
         return
+
+    mode = context.scene.pp_display_mode
+
+    if mode == 'VISUAL_DEPTH':
+        if (
+            cloud.type != 'MESH'
+            or cloud.data.attributes.get("mean_depth") is None
+        ):
+            mode = 'PLAIN'
+
+    configure_analysis_material(mode)
 
     modifier = cloud.modifiers.get(
         "Point_Display"
@@ -1922,6 +2680,11 @@ def register():
                     "Reveal",
                     "Color by when each cell first became visible along the journey"
                 ),
+                (
+                    'VISUAL_DEPTH',
+                    "Visual Depth",
+                    "Mean first-hit distance: red/orange at 0 m, yellow at 10 m, blue at 20 m and beyond"
+                ),
             ],
             default='PERSISTENCE',
             update=update_display_mode
@@ -1969,6 +2732,20 @@ def register():
             default=6,
             min=1,
             max=60
+        )
+    )
+
+    bpy.types.Scene.pp_depth_display_max = (
+        bpy.props.FloatProperty(
+            name="Depth Color Max",
+            description=(
+                "Distance mapped to the far/blue end of the "
+                "Visual Depth heatmap"
+            ),
+            default=20.0,
+            min=1.0,
+            max=500.0,
+            update=update_display_mode
         )
     )
 
@@ -2038,6 +2815,7 @@ def unregister():
     del bpy.types.Scene.pp_voxel_size
 
     del bpy.types.Scene.pp_frames_per_step
+    del bpy.types.Scene.pp_depth_display_max
 
     del bpy.types.Scene.pp_horizontal_fov
     del bpy.types.Scene.pp_vertical_fov
