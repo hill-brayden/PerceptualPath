@@ -1,6 +1,6 @@
 # Perceptual Path
 
-A Blender add-on for architectural perception analysis by Brayden Hill.
+A Blender add-on for architectural perception analysis.
 
 Perceptual Path samples a human-height viewer along a navigation route, records first-hit visible surfaces, and builds a point-cloud memory of the journey. The measurements support design interpretation; they do not rate architecture as good or bad.
 
