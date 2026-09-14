@@ -1,391 +1,201 @@
-# Perceptual Path — Project Context / Handoff Notes
-**Last updated:** 2026-09-12  
-**Primary environment:** Blender 5.2.x + Python add-on  
-**Current working build:** `Perceptual_Path_v0_5_2_Analysis_FIXED.py`
+# Perceptual Path — Updated Project Context
 
----
+**Updated:** 2026-09-13  
+**Current user-facing milestone:** Perceptual Path V1.5  
+**Next target:** V1.6 analytical expansion
 
-## 1. Project Summary
+## 1. Project Overview
+Perceptual Path is a Blender add-on for architectural perception analysis.
 
-**Perceptual Path** is a Blender add-on being developed for an architecture studio workflow. The goal is to simulate a human-like agent moving through architectural geometry, record what the agent can actually see within a human field of view, convert that visibility data into a 3D point cloud, and derive useful architectural analysis from the accumulated perception.
+It began as a simple stationary human-POV raycaster and now can:
 
-The tool is **not intended to declare architecture objectively “good” or “bad.”** Instead, it is meant to produce measurable evidence that can support qualitative design judgments and Assignment 2 evaluation criteria.
-
-The central conceptual chain is:
-
-```text
-ARCHITECTURAL GEOMETRY
-        ↓
-START + END CONDITIONS
-        ↓
-AGENT NAVIGATION
-        ↓
-HUMAN FIELD OF VIEW
-        ↓
-3D RAYCASTING
-        ↓
-VISIBLE-SURFACE POINT CLOUD
-        ↓
-PERCEPTION MEMORY
-        ↓
-PERSISTENCE / REVEAL
-        ↓
-ARCHITECTURAL METRICS
-        ↓
-COMPARISON / EVALUATION
-```
-
----
-
-## 2. Studio / Assignment Context
-
-This add-on is being developed alongside **Assignment 2: Proto-Architectural Spaces**.
-
-The assignment develops multiple spatial iterations from a **shared geometric system**, organized around three programmatic categories:
-
-- Gathering
-- Workspace / Office
-- Lobby / Entrance
-
-The studio wants multiple iterations to be generated, analyzed, evaluated, and selected.
-
-The add-on is intended to become one evaluation instrument within that process.
-
-The most useful kinds of design questions are expected to include:
-
-- When does a destination or space become visible?
-- How much of the architecture remains visually persistent during a journey?
-- Does the space reveal itself all at once or gradually?
-- Is the experience visually open, enclosed, compressed, or released?
-- Does the geometry create strong visual anchors?
-- Does a workspace remain visually exposed to circulation?
-- Does a gathering space act as a persistent destination?
-- Does a lobby provide immediate orientation or delayed reveal?
-- How do multiple generated variants differ under equivalent start/end conditions?
+- place Start and End points;
+- generate an A* route through architecture;
+- move a human-height virtual viewer along that route;
+- cast rays through a human field of view;
+- record only first-hit visible surfaces;
+- accumulate those hits into a 3D point-cloud memory;
+- calculate Persistence;
+- calculate Reveal;
+- visualize heatmaps;
+- animate the journey;
+- progressively reveal the point cloud during playback;
+- show an Agent POV camera in the current working project;
+- report basic route/perception metrics.
 
 The long-term workflow is:
 
-```text
-shared geometric system
-        ↓
-variation A / B / C / ...
-        ↓
-Perceptual Path analysis
-        ↓
-metrics + point cloud graphics
-        ↓
-criteria-based comparison
-        ↓
-selection / iteration
-```
+`Generate Space → Simulate Occupant → Measure Perception → Compare → Evaluate → Iterate`
 
----
+The software measures behavior. The designer decides whether that behavior is desirable.
 
-## 3. Core Concept
-
-The point cloud is **not a normal scan of the building**.
-
-It is a record of what an occupant was capable of seeing while navigating through the architecture.
-
-A ray is cast from the virtual eye. Only the **first geometry intersection** is recorded.
-
-Therefore:
-
-```text
-EYE ───────────────→ WALL ─────────→ HIDDEN GEOMETRY
-                     ●
-```
-
-Only the `●` point is recorded.
-
-This means:
-
-- geometry behind walls is occluded;
-- visible surfaces are recorded;
-- hidden surfaces remain absent;
-- the cloud is a visualization of **perception**, not total geometry.
-
-This distinction is central to explaining the project.
-
----
-
-## 4. Development History / Milestones
-
-### v0.1 — Stationary Human POV Scanner
-Implemented:
-
-- `Agent_Eye`
-- `Agent_Target`
-- human-like field of view
-- horizontal FOV
-- vertical FOV
-- ray density controls
-- Blender raycasting
-- first-hit geometry capture
-- visible point-cloud generation
-- Geometry Nodes point display
-
-Initial test settings were roughly:
-
-```text
-Horizontal FOV: 110°
-Vertical FOV:    70°
-Horizontal Rays: 90
-Vertical Rays:   50
-```
-
-A stationary scan successfully produced points on visible floors/walls and respected occlusion.
-
-### v0.2 — Start / End + A* Pathfinding
-Implemented:
-
-- `PP_Start`
-- `PP_End`
-- route generation
-- 2D / 2.5D navigation grid
-- wall obstacle detection
-- agent clearance
-- A* search
-- visible Blender curve `PP_Path`
-
-Current pathfinding logic:
-
-1. Sample the XY plan into a grid.
-2. Treat tall mesh objects as obstacles.
-3. Expand obstacle bounding boxes by agent clearance.
-4. Convert Start and End into grid positions.
-5. Run A*.
-6. Convert the resulting nodes back to world coordinates.
-7. Build a Blender curve.
-
-Important current limitation:
-
-- obstacle checking is based on **XY bounding boxes**, not exact mesh collision;
-- rotated walls can generate oversized collision boxes;
-- navigation is currently plan-based rather than full 3D;
-- stairs/ramps/multilevel navigation are not implemented yet.
-
-### v0.3 — Run Experience / Accumulated Perception Cloud
-Implemented:
-
-- sample positions along `PP_Path`;
-- raise the viewer to human eye height;
-- face the viewer toward the next path node;
-- raycast human FOV at each sampled viewpoint;
-- accumulate all visible geometry;
-- create `PP_Experience_Cloud`.
-
-Conceptually:
-
-```text
-START
-  ↓
-viewpoint 0 → scan
-  ↓
-viewpoint 1 → scan
-  ↓
-viewpoint 2 → scan
-  ↓
-...
-  ↓
-END
-
-all visible hits
-        ↓
-PP_Experience_Cloud
-```
-
-Current gaze behavior:
-
-```text
-gaze direction = direction of travel
-```
-
-Future versions may allow head/gaze exploration separate from body/path direction.
-
-### v0.3 / v0.4 — Perception Memory
-Raw overlapping ray hits were replaced with spatial memory cells.
-
-A hit is quantized using a voxel-like memory key:
-
-```python
-(
-    round(point.x / voxel_size),
-    round(point.y / voxel_size),
-    round(point.z / voxel_size)
-)
-```
-
-Nearby observations therefore become the same spatial region.
-
-Each memory cell stores:
-
-```text
-position_sum
-count
-first_seen
-last_seen
-```
-
-The final point position is the average of the observations stored in that cell.
-
-This dramatically reduces noisy duplicate points and creates useful analysis data.
-
----
-
-## 5. Important Persistence Correction
-
-Persistence should **not** count every ray independently.
-
-Example of the bad interpretation:
-
-```text
-one viewpoint
-5 rays hit one memory cell
-→ count = 5
-```
-
-That would incorrectly make ray density affect architectural persistence.
-
-The current working logic instead groups all hits from one viewpoint into memory cells first.
-
-Each cell can be counted only **once per sampled viewpoint**.
-
-Therefore:
-
-```text
-persistence =
-number of sampled viewpoints where region was visible
-/
-total sampled viewpoints
-```
+## 2. Assignment 2 Relevance
+The add-on supports Assignment 2: Proto-Architectural Spaces, where multiple iterations are developed from a shared geometric system and compared across Gathering, Workspace/Office, and Lobby/Entrance conditions.
 
 Examples:
 
-```text
-0.10 = region visible from 10% of viewpoints
-0.50 = region visible from 50% of viewpoints
-0.90 = region visible from 90% of viewpoints
-```
+### Lobby
+- When does reception/destination become visible?
+- Is orientation immediate or delayed?
+- Is circulation direct or exploratory?
+- Does a visual anchor persist?
 
-This interpretation is much more defensible academically.
+### Workspace
+- How visually exposed are work areas?
+- What remains visually connected?
+- How deep is the visual field?
+- Which surfaces remain dominant?
 
----
+### Gathering
+- Is gathering continuously visible?
+- Is it concealed and later revealed?
+- Does the approach compress then release?
+- Is circulation direct or sequential?
 
-## 6. Current Point Attributes
+## 3. Core Perception Logic
+At each sampled eye position:
 
-`PP_Experience_Cloud` contains named per-point attributes:
+`Agent Eye → Human FOV → Raycast → First Geometry Hit → Save XYZ`
 
-### `observation_count`
-Integer number of sampled viewpoints from which the memory cell was visible.
+Only the first hit is recorded. Geometry behind an occluding wall is not.
 
-### `persistence`
-Normalized 0–1 value:
+Therefore the point cloud represents **perception**, not total building geometry.
 
-```text
-observation_count / total sampled viewpoints
-```
+## 4. Navigation
+Objects:
+- `PP_Start`
+- `PP_End`
+- `PP_Path`
 
-Interpretation:
+Current route logic:
+1. project obstacles into XY;
+2. expand obstacle bounds using Agent Clearance;
+3. discretize into a grid;
+4. run A*;
+5. convert nodes back to world coordinates;
+6. create a Blender curve.
 
-> How repeatedly / continuously did this spatial region remain visually accessible during the journey?
+Current navigation is best described as **2.5D**:
+- route solved primarily in plan;
+- perception remains fully 3D.
 
-### `first_seen`
-Normalized 0–1 position in the journey where the region first entered perception.
+Known limitations:
+- no true stairs/ramps/multilevel navigation yet;
+- rotated walls can be over-blocked due to bounding boxes;
+- gaze mostly follows direction of travel;
+- not yet true autonomous exploration.
 
-```text
-0.0 = discovered near START
-1.0 = discovered near END
-```
+## 5. Human Vision
+Key objects:
+- `Agent_Eye`
+- `Agent_Target`
 
-Interpretation:
+Typical settings:
+- Horizontal FOV: 110°
+- Vertical FOV: 70°
+- Horizontal Rays: 40–120
+- Vertical Rays: 25–80
 
-> When did this region first become visible?
+The regular ray grid was useful for debugging but is now visually limiting.
 
-### `last_seen`
-Normalized 0–1 position of the final sampled viewpoint from which the region was visible.
+## 6. Perception Memory
+Raw ray hits are grouped into 3D spatial memory cells using a voxel-like key based on `pp_voxel_size`.
 
-Potential future use:
+Typical memory cell size:
+- 0.12–0.21 m
 
-- disappearance;
-- separation;
-- visual memory;
+Current memory data includes:
+- `position_sum`
+- `count`
+- `first_seen`
+- `last_seen`
+
+## 7. Persistence
+Persistence answers:
+
+**How often did this region remain visible during the journey?**
+
+Definition:
+
+`persistence = sampled viewpoints where region was visible / total sampled viewpoints`
+
+Multiple rays from the same viewpoint hitting one cell count only once.
+
+Interpretation can include:
+- visual anchor;
 - continuity;
-- duration.
+- persistent destination;
+- dominant edge;
+- sustained spatial relationship.
 
----
+## 8. Reveal
+Reveal answers:
 
-## 7. Display Modes
+**When did this region first enter perception?**
 
-The add-on currently supports:
+`first_seen` is normalized from:
+- 0.0 = beginning of journey
+- 1.0 = end of journey
 
-### Plain
-Neutral point-cloud visualization.
+Reveal can describe:
+- threshold;
+- anticipation;
+- discovery;
+- orientation;
+- delayed disclosure.
 
-### Persistence
-Heatmap driven by `persistence`.
+Current summary divides Reveal into:
+- Early
+- Mid
+- Late
 
-Approximate meaning:
-
-```text
-BLUE ───────── YELLOW ───────── RED
-brief                             persistent
-```
-
-Interpretation:
-
-> How frequently did this spatial region remain visible?
-
-### Reveal
-Heatmap driven by `first_seen`.
-
-Approximate meaning:
-
-```text
-BLUE / CYAN ─── PURPLE ─── RED
-seen early                    seen late
-```
-
-Interpretation:
-
-> At what stage in the journey did this spatial region first become visible?
-
-Material Preview is needed to clearly see the heatmap colors.
-
-A dark architectural context material currently makes the analysis cloud much easier to read.
-
----
-
-## 8. Current UI Controls
-
-The Perceptual Path Blender sidebar currently contains or is intended to contain:
-
-### AGENT
-- Create Agent
-
-### ROUTE
-- Create Start
-- Create End
-- Grid Size
-- Agent Clearance
-- Generate Path
-- Eye Height
-- Sample Every
-- Memory Cell Size
-- Run Experience
-
-### DISPLAY
+## 9. Current Display Modes
+Current:
 - Plain
 - Persistence
 - Reveal
-- legend / explanation
 
-### PLAYBACK
-- Frames Per Step
-- Create Playback
-- Spacebar playback
+Persistence:
+`Blue → Yellow → Red`
+`brief → persistent`
 
-### ANALYSIS SUMMARY
+Reveal:
+`Blue/Cyan → Purple → Red`
+`early → late`
+
+Black architectural materials have proven much easier to read than white context.
+
+## 10. Playback
+Playback uses the existing `first_seen` attribute.
+
+A Geometry Nodes value named `PP_Playback_Progress` animates from 0 → 1.
+
+Conceptual logic:
+
+```text
+if first_seen > playback_progress:
+    hide point
+else:
+    show point
+```
+
+This means playback does not rerun raycasts every frame.
+
+Current limitation:
+- point reveal is relatively binary rather than smoothly fading.
+
+## 11. Agent POV
+Agent POV has been successfully set up in Blender and is considered functional enough for now.
+
+This allows:
+- Plan
+- 3D perception cloud
+- Agent POV
+
+POV is not the immediate development priority.
+
+## 12. Current Analysis Summary
+Current working metrics include:
 - Route Length
 - Viewpoints
 - Visible Regions
@@ -395,811 +205,337 @@ The Perceptual Path Blender sidebar currently contains or is intended to contain
 - Mid Reveal
 - Late Reveal
 
-### VISION
-- Horizontal FOV
-- Vertical FOV
-- Horizontal Rays
-- Vertical Rays
-- Max Distance
-- Point Size
-- Scan POV
+A recent test produced roughly:
+- Route Length: 18.56 m
+- Viewpoints: 15
+- Visible Regions: 14,604
+- Mean Persistence: 19%
+- Max Persistence: 66.7%
+- Early Reveal: 62.7%
+- Mid Reveal: 12.1%
+- Late Reveal: 24.9%
 
----
+These describe behavior, not quality.
 
-## 9. Playback System
+## 13. Simplified Metric Vocabulary
+Two proposed metrics are intentionally postponed.
 
-Current playback build:
+### Visibility Duration — postponed
+This describes first-to-last sighting span, but Persistence currently communicates the more useful idea: how often a region was actually visible.
 
-`Perceptual_Path_v0_5_Playback_FIXED.py`
+### Enclosure — postponed
+Enclosure is related to the distribution of ray-hit distances. Visual Depth is the clearer first metric.
 
-The analysis build is based on that working playback version.
+## 14. Preferred V1.6 Metrics
+Keep the next analytical set focused:
 
-Playback works by using the already-computed `first_seen` point attribute.
+1. Persistence — **What stays with me?**
+2. Reveal — **When do I discover it?**
+3. Visual Depth — **How far can I see?**
+4. Reveal Rate — **Where does a lot of new space suddenly appear?**
+5. Path Directness / Turns — **How does circulation choreograph the experience?**
 
-A Geometry Nodes chain reads:
+## 15. V1.6A — Visual Depth
+Visual Depth is the next recommended implementation.
 
-```text
-first_seen
-```
+Definition:
 
-and compares it against an animated:
-
-```text
-PP_Playback_Progress
-```
-
-value ranging from:
-
-```text
-0.0 → 1.0
-```
-
-If:
-
-```text
-first_seen > playback_progress
-```
-
-that point is considered “future” information and is deleted from the displayed cloud.
-
-As playback progresses, more points appear.
-
-This means playback does **not need to rerun raycasts every frame**.
-
-The agent's `Agent_Eye` and `Agent_Target` positions are keyframed along the route.
-
-Workflow:
-
-```text
-Generate Path
-→ Run Experience
-→ Create Playback
-→ press Spacebar
-```
-
-Playback currently visualizes:
-
-- agent movement;
-- progressive spatial reveal;
-- accumulated perception.
-
----
-
-## 10. Analysis Summary — Current Metrics
-
-Latest build:
-
-`Perceptual_Path_v0_5_2_Analysis_FIXED.py`
-
-The Analysis Summary currently calculates:
-
-### Route Length
-Total polyline length of `PP_Path`.
+`distance from Agent_Eye to the first visible ray-hit surface`
 
 Interpretation:
-
-> How far did the occupant travel?
-
-Useful for comparing efficiency / indirectness.
-
-### Viewpoints
-Number of sampled eye positions used during the experience.
-
-Interpretation:
-
-> Methodological sample size.
-
-Example explanation:
-
-> “The route was analyzed from 21 sampled human-eye positions.”
-
-### Visible Regions
-Number of unique memory cells discovered.
-
-Interpretation:
-
-> How many distinct spatial regions became visually accessible?
-
-This is a rough quantity and should not yet be treated as a standalone quality score.
-
-### Mean Persistence
-
-```text
-mean of all memory-cell persistence values
-```
-
-Interpretation:
-
-> On average, how continuously did observed architectural regions remain present through the route?
-
-### Max Persistence
-Highest persistence value found in the experience.
-
-Interpretation:
-
-> The strongest visual anchor / most continuously visible spatial region.
-
-### Reveal Distribution
-
-The normalized journey is divided into thirds:
-
-```text
-0.00–0.333 = Early
-0.333–0.666 = Mid
-0.666–1.00 = Late
-```
-
-Every region is categorized by `first_seen`.
-
-The add-on reports:
-
-```text
-Early Reveal %
-Mid Reveal %
-Late Reveal %
-```
-
-Example:
-
-```text
-Early Reveal: 52%
-Mid Reveal:   29%
-Late Reveal:  19%
-```
-
-Interpretation:
-
-> Most of the ultimately visible architecture was disclosed early.
-
-Another geometry might produce:
-
-```text
-Early Reveal: 18%
-Mid Reveal:   32%
-Late Reveal:  50%
-```
-
-Interpretation:
-
-> The geometry creates a much more delayed / sequential reveal.
-
-These are **behavior descriptors**, not “good/bad” scores.
-
----
-
-## 11. Architectural Meaning of Current Metrics
-
-### Persistence
-Can suggest:
-
-- visual anchor;
-- spatial continuity;
-- persistent destination;
-- landmark condition;
-- dominant edge/wall;
-- sustained visual relationship.
-
-### Reveal
-Can suggest:
-
-- threshold;
-- concealment;
-- discovery;
-- sequence;
-- anticipation;
-- wayfinding;
-- delayed spatial disclosure.
-
-### Path Length
-Can suggest:
-
-- efficiency;
-- indirect exploration;
-- journey complexity.
-
-### Visible Regions
-Can suggest:
-
-- amount of perceptual information;
-- visual access;
-- uniqueness of spatial discovery.
-
-These metrics should support qualitative architectural descriptors rather than replace them.
-
----
-
-## 12. Intended Assignment 2 Use by Program Type
-
-### Lobby / Entrance
-Potential questions:
-
-- Is reception visible immediately?
-- When does the destination become legible?
-- Does the entry sequence reveal too much immediately?
-- Is there a visual anchor?
-- Is orientation obvious or delayed?
-- Does the lobby sequence create approach → entry → orientation → handoff?
-
-Useful metrics:
-
-- destination reveal;
-- persistence;
-- visual depth;
-- route length;
-- openness;
-- late vs. early reveal.
-
-### Workspace / Office
-Potential questions:
-
-- How exposed are workstations to circulation?
-- How visually separated are private work areas?
-- Can occupants retain visual connection to gathering/support spaces?
-- Is the workspace layered or fully open?
-- Which surfaces remain dominant visual anchors?
-
-Useful metrics:
-
-- visual exposure;
-- persistence;
-- visual continuity;
-- enclosure;
-- occlusion;
-- distance to shared space.
-
-### Gathering
-Potential questions:
-
-- Does the gathering space remain visible during approach?
-- Is it a continuous anchor or a hidden destination?
-- Does the room reveal suddenly or gradually?
-- Are people / activity zones visually connected?
-- Is gathering centralized, fragmented, layered, open, or enclosed?
-
-Useful metrics:
-
-- persistence;
-- reveal;
-- visual depth;
-- openness;
-- continuity;
-- compression/release.
-
----
-
-## 13. Planned Near-Term Development
-
-### NEXT: v0.6 — Section Analysis
-
-Goal:
-
-> Use the existing 3D perception dataset to create clean section-based architectural graphics.
-
-Important principle:
-
-**Section should not require a new simulation.**
-
-The agent navigates and perceives in 3D.
-
-Plan, section, and 3D are simply different ways of viewing the same experience dataset.
-
-Planned functionality:
-
-```text
-Create Section Plane
-Section Thickness
-Show Section Cloud
-Plan View
-Section View
-3D View
-Agent POV
-```
-
-Possible logic:
-
-- create `PP_Section`;
-- define a plane + slice thickness;
-- calculate distance of each cloud point to the plane;
-- show only points within the slice;
-- optionally clip model context too.
-
-Expected result:
-
-```text
-FULL 3D CLOUD
-     ↓
-SECTION SLICE
-     ↓
-architectural sectional perception diagram
-```
-
-This is especially important because the studio is interested in sectional / vertical relationships.
-
----
-
-## 14. Planned Metrics After Section
-
-The next useful experiential metrics are expected to be:
-
-### Visual Depth
-Distance from the eye to ray-hit surfaces.
-
-Possible outputs:
-
-- average depth;
-- maximum depth;
-- forward visual depth;
-- visual-depth graph over journey.
-
-Interpretation:
-
-- intimacy;
-- openness;
-- long visual axes;
-- spatial expansion.
-
-### Enclosure
-Likely derived from distribution of nearby FOV ray-hit distances.
-
-Interpretation:
-
 - compressed;
-- enclosed;
 - intimate;
-- open.
+- expansive;
+- long visual axis;
+- spatial release.
 
-### Openness
-Potentially:
+Visual Depth is not the same as Enclosure. A long narrow corridor can have high forward visual depth while remaining laterally enclosed.
 
-- proportion of rays traveling beyond a chosen distance;
-- percentage of long-distance visibility;
-- visual field without nearby obstruction.
+Recommended implementation:
+- preserve the stable `cast_fov()`;
+- add `cast_fov_detailed(...)`;
+- return `location` and `distance`;
+- use detailed raycasts in `Run Experience`;
+- extend memory with depth data;
+- write point attributes such as `mean_depth`, `min_depth`, `max_depth`;
+- add a `Visual Depth` display mode;
+- add Mean / Max Visual Depth to the summary.
 
-### Compression / Release
-Derived from changes in visual depth / enclosure across sampled viewpoints.
+Potential heatmap:
+`Red/Orange = near`
+`Yellow = medium`
+`Cyan/Blue = far`
 
-Expected graph:
+Keep the raw distance in meters. Do not normalize away the true analysis value.
 
-```text
-visual depth
-high                  ______
-                    /
-             ______/
-            /
-low _______/
-    START            END
-```
-
-Interpretation:
-
-> compressed sequence opening into spatial release.
-
-This is one of the strongest future Assignment 2 metrics.
-
----
-
-## 15. Longer-Term Comparison System
-
-Once the metrics are stable, the add-on should support analyzing multiple variants under equivalent conditions.
+## 16. Reveal Rate
+Reveal Rate should count newly discovered memory cells at each sampled viewpoint.
 
 Example:
 
 ```text
-                VAR A   VAR B   VAR C
-
-Route Length     18m     24m     20m
-Persistence      72%     48%     61%
-Late Reveal      21%     57%     36%
-Visual Depth     9.2m   14.8m   11.1m
-Enclosure        high    low     medium
+Step 1: +320
+Step 2: +74
+Step 3: +32
+Step 4: +19
+Step 5: +611  <- major reveal
 ```
 
-This would allow Assignment 2 iterations to be evaluated comparatively.
+This can identify threshold / reveal events.
 
-Important:
+It is primarily a route-level metric, not a point-cloud heatmap.
 
-The add-on should **not** say:
+## 17. Path Directness / Turns
+Planned route metrics:
+- route length;
+- direct Start→End distance;
+- directness ratio;
+- turn count;
+- average turn angle;
+- total angular change.
+
+Possible directness definition:
+
+`straight-line distance / actual route length`
+
+These values describe circulation behavior, not quality.
+
+## 18. Planned Sampling Modes
+Do not switch analysis to pure uncontrolled randomness.
+
+Preferred future modes:
+- **Analysis Grid** — deterministic and repeatable
+- **Jittered** — stratified jitter inside grid cells
+- **Presentation** — denser, smaller, jittered points for graphics
+
+The user specifically wants presentation clouds closer to previous studio graphics.
+
+Analytical metrics and presentation density should remain separable.
+
+## 19. Planned Smooth Playback
+Current reveal:
+`hidden → visible`
+
+Planned:
+`hidden → tiny/faint → medium → full`
+
+Possible fade:
+
+`fade = (playback_progress - first_seen) / fade_duration`
+
+Clamp to 0–1 and use it to drive point radius and/or brightness.
+
+## 20. Planned Live Persistence
+Desired animation:
+
+`Blue → Cyan → Yellow → Orange/Red`
+
+as the agent repeatedly sees a region.
+
+Current memory is insufficient for exact temporal replay because it only stores:
+- count
+- first_seen
+- last_seen
+
+Future memory needs something like:
+
+`seen_steps = [1, 2, 4, 7]`
+
+This allows true live persistence rather than using only final values.
+
+## 21. Section Analysis
+Section remains a major goal after the V1.6 analytical/graphic work.
+
+Principle:
+**Do not rerun a separate section simulation.**
+
+The point cloud is already 3D. Section should simply filter the existing dataset.
+
+Planned tools:
+- Create Section Plane
+- Section Thickness
+- Show Section Cloud
+- Plan View
+- Section View
+- 3D View
+
+## 22. Longer-Term Comparison
+Eventually compare multiple Assignment 2 variants under equivalent settings.
+
+Example:
 
 ```text
-VARIANT B = objectively best
+                A       B       C
+Route Length    18m     24m     20m
+Persistence     72%     48%     61%
+Late Reveal     21%     57%     36%
+Visual Depth    9.2m   14.8m   11.1m
+Directness      .82     .55     .68
 ```
 
-Instead, a designer / studio criterion can say something like:
+The designer then applies program-specific criteria.
+
+## 23. VS Code / Codex Workflow
+Recommended repo:
 
 ```text
-For a lobby:
-high orientation + early reveal = preferred
-
-For a dramatic gathering sequence:
-late reveal + strong compression/release = preferred
+PerceptualPath/
+├── AGENTS.md
+├── PERCEPTUAL_PATH_PROJECT_CONTEXT.md
+├── README.md
+├── addon/
+│   └── perceptual_path.py
+└── archive/
+    └── old_versions/
 ```
 
-The criteria determine desirability.
+The latest Blender-tested known-good add-on should become:
 
-The software measures behavior.
+`addon/perceptual_path.py`
 
----
+Use Git for version history.
 
-## 16. Long-Term Generative Goal
-
-Only after analysis/comparison is stable:
-
-```text
-PARAMETRIC GEOMETRY
-        ↓
-GENERATE VARIANTS
-        ↓
-RUN PERCEPTUAL PATH
-        ↓
-CALCULATE METRICS
-        ↓
-APPLY DESIGN CRITERIA
-        ↓
-RANK / SELECT
-        ↓
-MUTATE / ITERATE
+Baseline:
+```bash
+git init
+git add .
+git commit -m "Baseline working Perceptual Path V1.5"
 ```
 
-Possible geometry parameters:
-
-- terrace height;
-- opening width;
-- void size;
-- partition density;
-- ceiling height;
-- wall angle;
-- porosity;
-- rotation;
-- circulation width;
-- sectional offset.
-
-Potential development stages:
-
-### Manual parameter sliders
-Designer adjusts geometry and reruns analysis.
-
-### Batch generation
-Generate 10–20 controlled variants.
-
-### Comparative evaluation
-Analyze all variants with identical conditions.
-
-### Evolutionary generation
-Keep best-performing variants according to user-defined criteria, mutate parameters, generate new variants.
-
-This is a future objective, not the immediate priority.
-
----
-
-## 17. Current Known Limitations
-
-### Navigation
-- plan-based / 2.5D only;
-- not true 3D walkability;
-- no stairs/ramps yet;
-- obstacle collision uses XY bounding boxes;
-- rotated geometry can be over-blocked.
-
-### Agent
-- gaze follows direction of travel;
-- no independent head movement;
-- no behavioral exploration / curiosity;
-- no alternate route personalities;
-- no multi-agent simulation.
-
-### Vision
-- current rays use an angular grid;
-- no eye-tracking probability model;
-- no focal/peripheral acuity distinction;
-- no material transparency logic;
-- no mirror/reflection handling.
-
-### Point Cloud
-- memory-cell size influences spatial grouping;
-- point density depends on FOV ray density;
-- the metric should always be interpreted in context of settings;
-- black architectural context currently improves display manually.
-
-### Metrics
-- persistence and reveal are useful and fairly interpretable;
-- visible-region count is still crude;
-- visual depth/enclosure/compression-release are not yet implemented;
-- no score weighting system yet.
-
-### Presentation
-- legend currently lives in sidebar;
-- no graphic/export legend object yet;
-- no automated board export;
-- section output not yet implemented.
-
----
-
-## 18. Recommended Development Order
-
-Do not jump directly into automated geometry generation.
-
-Recommended order:
-
-```text
-CURRENT
-✓ POV scanner
-✓ point cloud
-✓ pathfinding
-✓ experience accumulation
-✓ perception memory
-✓ persistence
-✓ reveal
-✓ playback
-✓ analysis summary
-
-NEXT
-→ section analysis / section plane
-→ plan / section / 3D view presets
-→ visual depth
-→ enclosure
-→ compression / release
-→ iteration comparison
-
-LATER
-→ parametric geometry generation
-→ automated variant batches
-→ criterion weighting
-→ ranking
-→ mutation / evolutionary loop
+Feature branch:
+```bash
+git switch -c feature/visual-depth
 ```
 
----
-
-## 19. Coding / Architecture Notes for a Copilot Agent
-
-### Keep these object names stable
-
-```text
-Agent_Eye
-Agent_Target
-PP_Start
-PP_End
-PP_Path
-Perception_Cloud
-PP_Experience_Cloud
-PP_Analysis_Material
+Review:
+```bash
+git diff
 ```
 
-### Important Geometry Nodes names
-
-```text
-Point_Display
-PP_Set_Material
-PP_Playback_Progress
-PP_First_Seen
-PP_Delete_Future
-PP_Mesh_To_Points
+Rollback:
+```bash
+git restore addon/perceptual_path.py
 ```
 
-Future code should reuse these names where possible so UI/update callbacks do not break.
-
-### Important Scene properties
-
-Current properties include:
-
-```text
-pp_horizontal_fov
-pp_vertical_fov
-pp_horizontal_rays
-pp_vertical_rays
-pp_max_distance
-pp_point_size
-
-pp_grid_size
-pp_clearance
-
-pp_eye_height
-pp_sample_every
-pp_voxel_size
-
-pp_display_mode
-
-pp_frames_per_step
+Commit after Blender validation:
+```bash
+git add .
+git commit -m "Add visual depth analysis"
 ```
 
-Current Analysis Summary data is stored as custom scene dictionary values:
+## 24. ChatGPT + Codex Division of Work
+Use ChatGPT for:
+- architectural reasoning;
+- metric definitions;
+- Assignment 2 relevance;
+- screenshots/videos;
+- development planning;
+- conceptual debugging.
 
-```text
-scene["pp_route_length"]
-scene["pp_viewpoint_count"]
-scene["pp_region_count"]
-scene["pp_mean_persistence"]
-scene["pp_max_persistence"]
-scene["pp_early_reveal"]
-scene["pp_mid_reveal"]
-scene["pp_late_reveal"]
-```
+Use Codex in VS Code for:
+- reading the live codebase;
+- implementing approved plans;
+- syntax checks;
+- diff review;
+- surgical edits.
 
-### Core functions / responsibilities
+Ideal flow:
 
-Expected function responsibilities include:
+`User + ChatGPT decide WHAT/WHY → context files preserve decisions → Codex implements HOW → Git diff → Blender test → User + ChatGPT evaluate`
 
-```text
-get_or_create_empty()
-    object helper
+Codex should not silently redefine the methodology.
 
-delete_object_by_name()
-    cleanup helper
+## 25. Stable Names
+Important object names:
+- `Agent_Eye`
+- `Agent_Target`
+- `PP_Start`
+- `PP_End`
+- `PP_Path`
+- `Perception_Cloud`
+- `PP_Experience_Cloud`
+- `PP_Analysis_Material`
 
-cast_fov()
-    human FOV raycasting
+Important Geometry Nodes names:
+- `Point_Display`
+- `PP_Set_Material`
+- `PP_Playback_Progress`
+- `PP_First_Seen`
+- `PP_Delete_Future`
+- `PP_Mesh_To_Points`
 
-create_cloud_object()
-    simple stationary scan point display
+Important Scene properties include:
+- `pp_horizontal_fov`
+- `pp_vertical_fov`
+- `pp_horizontal_rays`
+- `pp_vertical_rays`
+- `pp_max_distance`
+- `pp_point_size`
+- `pp_grid_size`
+- `pp_clearance`
+- `pp_eye_height`
+- `pp_sample_every`
+- `pp_voxel_size`
+- `pp_display_mode`
+- `pp_frames_per_step`
 
-point_to_voxel()
-    memory-cell quantization
+Current summary data includes:
+- `pp_route_length`
+- `pp_viewpoint_count`
+- `pp_region_count`
+- `pp_mean_persistence`
+- `pp_max_persistence`
+- `pp_early_reveal`
+- `pp_mid_reveal`
+- `pp_late_reveal`
 
-configure_analysis_material()
-    Plain / Persistence / Reveal material setup
+## 26. Immediate Roadmap
 
-create_memory_cloud()
-    builds analytical experience cloud + attributes + Geometry Nodes
+### V1.6A
+- Visual Depth
+- Visual Depth heatmap
+- Mean Visual Depth
+- Max Visual Depth
 
-world_bbox_xy()
-    obstacle bounding-box projection
+### V1.6B
+- Reveal Rate
+- Path Directness
+- Turn Count / angular change
 
-get_obstacles()
-    identifies route obstacles
+### V1.6C
+- Analysis Grid
+- Jittered
+- Presentation sampling
 
-build_navigation_grid()
-    creates A* grid
+### V1.6D
+- Smooth playback fade/growth
 
-heuristic()
-    A* heuristic
+### V1.7
+- temporal `seen_steps`
+- live persistence color evolution
 
-astar()
-    route search
+### V1.8
+- Section Plane
+- Section Thickness
+- Plan / Section / 3D presets
 
-create_path_curve()
-    Blender path object
+### V2.0
+- multi-variant comparison
+- Assignment 2 evaluation logic
+- eventual generative iteration
 
-calculate_path_length()
-    route metric
-```
-
-Operators currently include:
-
-```text
-PP_OT_create_start
-PP_OT_create_end
-PP_OT_create_agent
-PP_OT_scan_pov
-PP_OT_generate_path
-PP_OT_run_experience
-PP_OT_create_playback
-```
-
-UI:
-
-```text
-PP_PT_main_panel
-```
-
----
-
-## 20. Testing Workflow
-
-When changing the add-on, preserve the following test workflow:
-
-```text
-1. Create / open simple maze geometry
-2. Make sure floor is near Z = 0
-3. Place PP_Start
-4. Place PP_End
-5. Generate Path
-6. Verify path avoids walls
-7. Run Experience
-8. Verify PP_Experience_Cloud exists
-9. Switch to Material Preview
-10. Test Persistence
-11. Test Reveal
-12. Create Playback
-13. Press Spacebar
-14. Verify Agent_Eye moves
-15. Verify point cloud progressively appears
-16. Check Analysis Summary
-```
-
-Useful test settings:
-
-```text
-Horizontal FOV:   110°
-Vertical FOV:      70°
-Horizontal Rays:   40
-Vertical Rays:     25
-Eye Height:       1.65 m
-Sample Every:        2–3
-Memory Cell Size: 0.12–0.21 m
-Point Size:       0.04–0.06
-Frames Per Step:     6
-```
-
----
-
-## 21. Basic Professor / Crit Explanation
-
+## 27. Professor / Crit Explanation
 Short explanation:
 
-> Perceptual Path uses a virtual human eye moving along a generated route. At each sampled position, rays are cast through a human-like field of view. Only the first visible geometry intersection is recorded. Those hits are accumulated into a point cloud representing what the occupant could actually perceive. The cloud stores when each region was first seen and how many viewpoints it remained visible from, which allows the same geometry to be visualized in terms of persistence and spatial reveal.
+> Perceptual Path simulates a human-height viewer moving through architectural geometry. At sampled positions along the route, rays are cast through a human-like field of view, and only the first visible geometry intersection is recorded. Those observations are grouped into a spatial point-cloud memory. The system can then visualize which regions remained visually persistent, when regions were first revealed, and increasingly other spatial measures such as visual depth and circulation behavior.
 
-If asked how persistence works:
+If asked whether the software decides what is good:
 
-> A spatial region is counted only once per sampled viewpoint. Persistence is the percentage of sampled viewpoints from which that region remained visible.
+> No. It measures spatial behavior. The studio criteria determine whether that behavior is desirable for a lobby, workspace, gathering space, or another condition.
 
-If asked how Reveal works:
+## 28. Current Project Identity
+Perceptual Path is:
 
-> Reveal records where along the normalized start-to-end journey each region first entered the visual field.
+**A Blender-based architectural perception instrument that converts a simulated occupant journey into spatial evidence for analysis, visualization, comparison, and eventually design iteration.**
 
-If asked what Blender provides:
-
-> Blender provides geometry, raycasting, animation, Geometry Nodes, materials, and the Python API. The add-on defines the architectural perception logic, agent navigation, memory, metrics, and visualization.
-
-If asked whether the tool makes design decisions:
-
-> The tool analyzes spatial behavior. The designer still decides which behaviors are desirable according to the design criteria.
-
----
-
-## 22. Design Philosophy
-
-Do not turn this project into:
-
-```text
-AI magically designs architecture.
-```
-
-The stronger project is:
-
-```text
-Architecture is generated through a controlled system.
-A simulated occupant experiences it.
-Perception becomes data.
-Data becomes evidence.
-Evidence informs evaluation.
-Evaluation guides iteration.
-```
-
-This is the conceptual identity of Perceptual Path.
-
----
-
-## 23. Immediate Next Task
-
-**Build v0.6 — Section Analysis.**
-
-Recommended minimum feature set:
-
-```text
-[ Create Section Plane ]
-
-Section Thickness: 0.30 m
-
-[ Show Section Cloud ]
-
-View:
-[ Plan ] [ Section ] [ 3D ]
-```
-
-Section should filter the existing `PP_Experience_Cloud`, not rerun the simulation.
-
-After section output is stable, implement:
-
-```text
-Visual Depth
-Enclosure
-Compression / Release
-```
-
-Then build multi-variant comparison.
-
----
-
-## 24. Current Project Status in One Sentence
-
-**Perceptual Path is currently a functioning Blender prototype that can navigate an agent between user-defined points, simulate human-field-of-view visibility along the route, accumulate visible geometry into a 3D perception-memory point cloud, visualize persistence and reveal, animate the perceptual journey, and report basic route/perception statistics; the next major milestone is architectural section analysis.**
+The point cloud is the evidence layer, not the final goal.
